@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Redirecting...</title>
+    <script type="text/javascript">
+        function redirect() {
+            // Get the 'url' query parameter from the URL
+            var urlParams = new URLSearchParams(window.location.search);
+            var redirectURL = urlParams.get('url');
+            if (redirectURL) {
+                // Redirect the user to the custom URL
+                window.location.href = redirectURL;
+            } else {
+                document.write('Invalid or missing URL parameter.');
+            }
+        }
+        // Run the redirect function when the page loads
+        window.onload = redirect;
+    </script>
+</head>
+<body>
+    <p>Redirecting...</p>
+</body>
+</html>
