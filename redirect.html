@@ -11,9 +11,6 @@
             
             if (redirectURL) {
                 window.location.href = redirectURL;
-                setTimeout(function() {
-                    alert("Unable to open the timeline with the custom protocol. Please ensure the app is installed.");
-                }, 2000); // fallback
             } else {
                 document.body.innerHTML = 'Invalid or missing URL parameter.';
             }
