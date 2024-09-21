@@ -11,6 +11,11 @@
             if (redirectURL) {
                 // Redirect the user to the custom URL
                 window.location.href = redirectURL;
+                
+                // Close the window after redirecting
+                setTimeout(function() {
+                    window.close();
+                }, 1000); // Wait 1 second before closing to allow the redirect
             } else {
                 document.write('Invalid or missing URL parameter.');
             }
