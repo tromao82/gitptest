@@ -1,21 +1,23 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Redirecting...</title>
     <script type="text/javascript">
         function redirect() {
-            // Get the 'url' query parameter from the URL
-            var urlParams = new URLSearchParams(window.location.search);
-            var redirectURL = urlParams.get('url');
+            const urlParams = new URLSearchParams(window.location.search);
+            const redirectURL = urlParams.get('url');
+            
             if (redirectURL) {
-                // Redirect the user to the custom URL
                 window.location.href = redirectURL;
+                setTimeout(function() {
+                    alert("Unable to open the timeline with the custom protocol. Please ensure the app is installed.");
+                }, 2000); // fallback
             } else {
-                document.write('Invalid or missing URL parameter.');
+                document.body.innerHTML = 'Invalid or missing URL parameter.';
             }
         }
-        // Run the redirect function when the page loads
         window.onload = redirect;
     </script>
 </head>
