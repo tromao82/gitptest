@@ -4,25 +4,30 @@
     <meta charset="UTF-8">
     <title>Redirecting...</title>
     <script type="text/javascript">
-        function redirect() {
+        function openLink() {
             // Get the 'url' query parameter from the URL
             var urlParams = new URLSearchParams(window.location.search);
             var redirectURL = urlParams.get('url');
             
             if (redirectURL) {
-                // First, update the URL in the browser without reloading the page
-                window.history.replaceState({}, '', redirectURL);
+                // Create an anchor element
+                var link = document.createElement('a');
+                link.href = redirectURL;
 
-                // Then, redirect to the updated URL
-                setTimeout(function() {
-                    window.location.href = redirectURL;
-                }, 500); // Short delay to allow the URL to update
+                // Append the link to the body (but it's hidden)
+                document.body.appendChild(link);
+
+                // Simulate a click on the link
+                link.click();
+
+                // Remove the link after clicking it
+                document.body.removeChild(link);
             } else {
                 document.body.innerHTML = 'Invalid or missing URL parameter.';
             }
         }
-        // Run the redirect function when the page loads
-        window.onload = redirect;
+        // Run the openLink function when the page loads
+        window.onload = openLink;
     </script>
 </head>
 <body>
