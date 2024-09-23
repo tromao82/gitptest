@@ -19,11 +19,6 @@
                 a.style.display = 'none';
                 document.body.appendChild(a);
                 a.click();
-
-                // Close the window after a delay to allow the redirect to happen
-                setTimeout(function() {
-                    window.close();
-                }, 1000);
             } else {
                 document.body.innerHTML = 'Invalid or missing URL parameter.';
             }
