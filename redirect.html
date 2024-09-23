@@ -9,10 +9,16 @@
             var redirectURL = urlParams.get('url');
             
             if (redirectURL) {
+                // Create an anchor element with the ijet2 URL and trigger the click
                 var link = document.createElement('a');
                 link.href = redirectURL;
                 document.body.appendChild(link);
                 link.click();
+                
+                // Close the window after a short delay to allow the URL to process
+                setTimeout(function() {
+                    window.close();
+                }, 1000); // Adjust the timeout if needed
             } else {
                 document.body.innerHTML = 'Invalid or missing URL parameter.';
             }
