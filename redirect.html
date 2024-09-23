@@ -10,6 +10,9 @@
             var redirectURL = urlParams.get('url');
 
             if (redirectURL) {
+                // Replace the current URL with the ijet2 URL in the address bar without reloading the page
+                window.history.replaceState(null, null, redirectURL);
+
                 // Create an anchor element and simulate a click
                 var a = document.createElement('a');
                 a.href = redirectURL;
