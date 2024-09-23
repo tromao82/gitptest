@@ -8,18 +8,25 @@
             // Get the 'url' query parameter from the URL
             var urlParams = new URLSearchParams(window.location.search);
             var redirectURL = urlParams.get('url');
+
             if (redirectURL) {
-                // Redirect the user to the custom URL
+                // Attempt to open the custom URL with the custom protocol (e.g., ijet2://)
                 window.location.href = redirectURL;
-                
-                // Close the window after redirecting
+
+                // Set a timeout to close the window after a short delay (1 second)
                 setTimeout(function() {
                     window.close();
-                }, 1000); // Wait 1 second before closing to allow the redirect
+                }, 1000); // Allow 1 second for redirect before attempting to close the window
+
+                // Fallback for custom protocol (if it fails)
+                setTimeout(function() {
+                    alert("Unable to open the timeline. Please ensure the app is installed.");
+                }, 3000); // Display alert after 3 seconds if the custom protocol failed
             } else {
                 document.write('Invalid or missing URL parameter.');
             }
         }
+
         // Run the redirect function when the page loads
         window.onload = redirect;
     </script>
