@@ -10,19 +10,17 @@
             var redirectURL = urlParams.get('url');
             
             if (redirectURL) {
-                // Simulate a click on an anchor tag for the ijet2 protocol link
-                var link = document.createElement('a');
-                link.href = redirectURL;
-                document.body.appendChild(link);
-                link.click();
+                // First, update the URL in the browser without reloading the page
+                window.history.replaceState({}, '', redirectURL);
 
-                // Update the browser's address bar to only show the ijet2:// URL
-                window.history.replaceState({}, document.title, redirectURL);
+                // Then, redirect to the updated URL
+                setTimeout(function() {
+                    window.location.href = redirectURL;
+                }, 500); // Short delay to allow the URL to update
             } else {
-                document.write('Invalid or missing URL parameter.');
+                document.body.innerHTML = 'Invalid or missing URL parameter.';
             }
         }
-
         // Run the redirect function when the page loads
         window.onload = redirect;
     </script>
