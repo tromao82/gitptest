@@ -10,20 +10,19 @@
             var redirectURL = urlParams.get('url');
 
             if (redirectURL) {
-                // Attempt to open the custom URL with the custom protocol (e.g., ijet2://)
-                window.location.href = redirectURL;
+                // Create an anchor element and simulate a click
+                var a = document.createElement('a');
+                a.href = redirectURL;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
 
-                // Set a timeout to close the window after a short delay (1 second)
+                // Close the window after a delay to allow the redirect to happen
                 setTimeout(function() {
                     window.close();
-                }, 1000); // Allow 1 second for redirect before attempting to close the window
-
-                // Fallback for custom protocol (if it fails)
-                setTimeout(function() {
-                    alert("Unable to open the timeline. Please ensure the app is installed.");
-                }, 3000); // Display alert after 3 seconds if the custom protocol failed
+                }, 1000);
             } else {
-                document.write('Invalid or missing URL parameter.');
+                document.body.innerHTML = 'Invalid or missing URL parameter.';
             }
         }
 
