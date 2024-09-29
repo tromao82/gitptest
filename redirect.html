@@ -3,22 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <title>Redirecionando...</title>
+</head>
+<body>
+    <p>Se nada acontecer automaticamente, clique no link abaixo para abrir:</p>
+    <a id="manualLink" href="#">Clique aqui para continuar</a>
+
     <script type="text/javascript">
-        function redirect() {
+        window.onload = function() {
             var urlParams = new URLSearchParams(window.location.search);
             var redirectURL = urlParams.get('url');
-            
+
             if (redirectURL) {
-                // Redireciona diretamente para o URL obtido dos parâmetros.
-                window.location.href = redirectURL;
+                var link = document.getElementById('manualLink');
+                link.href = redirectURL;
+                link.style.display = 'block'; // Deixa o link visível para o usuário
             } else {
                 document.body.innerHTML = 'Parâmetro de URL inválido ou ausente.';
             }
         }
     </script>
-</head>
-<body>
-    <p>Redirecionando... Se nada acontecer, clique no botão abaixo:</p>
-    <button onclick="redirect()">Clique aqui para Redirecionar Manualmente</button>
 </body>
 </html>
