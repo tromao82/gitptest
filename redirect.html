@@ -3,24 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <title>Redirecionando...</title>
-</head>
-<body>
-    <p>Se nada acontecer automaticamente, clique no link abaixo para abrir:</p>
-    <a id="manualLink" href="#">Clique aqui para continuar</a>
-
     <script type="text/javascript">
-        window.onload = function() {
+        function redirect() {
             var urlParams = new URLSearchParams(window.location.search);
             var redirectURL = urlParams.get('url');
 
             if (redirectURL) {
-                var link = document.getElementById('manualLink');
-                link.href = redirectURL;
-                link.style.display = 'block'; // Deixa o link visível para o usuário
+                // Redireciona para o URL ijet2 diretamente
+                window.location.replace(redirectURL);
             } else {
                 document.body.innerHTML = 'Parâmetro de URL inválido ou ausente.';
             }
         }
+        window.onload = redirect;
     </script>
+</head>
+<body>
+    <p>Redirecionando...</p>
 </body>
 </html>
