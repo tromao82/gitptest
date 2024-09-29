@@ -9,16 +9,16 @@
             var redirectURL = urlParams.get('url');
             
             if (redirectURL) {
-                // Create an anchor element with the ijet2 URL and trigger the click
-                var link = document.createElement('a');
-                link.href = redirectURL;
-                document.body.appendChild(link);
-                link.click();
-                
-                // Close the window after a short delay to allow the URL to process
+                // Attempt to redirect directly using window.location.href
+                window.location.href = redirectURL;
+
+                // Provide a fallback if the automatic redirect is blocked
                 setTimeout(function() {
-                    window.close();
-                }, 3000); // Adjust the timeout if needed
+                    var confirmRedirect = confirm("Automatic redirection failed. Click OK to proceed.");
+                    if (confirmRedirect) {
+                        window.location.href = redirectURL;
+                    }
+                }, 2000); // Allow time for the browser to process before showing the prompt
             } else {
                 document.body.innerHTML = 'Invalid or missing URL parameter.';
             }
@@ -27,6 +27,7 @@
     </script>
 </head>
 <body>
-    <p>Redirecting...</p>
+    <p>Redirecting... If nothing happens, please allow pop-ups and click below:</p>
+    <button onclick="redirect()">Redirect Manually</button>
 </body>
 </html>
