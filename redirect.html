@@ -10,14 +10,21 @@
 
     <script type="text/javascript">
         window.onload = function() {
+            // Obtém os parâmetros da URL
             var urlParams = new URLSearchParams(window.location.search);
             var redirectURL = urlParams.get('url');
 
+            // Verifica se o parâmetro URL está presente
             if (redirectURL) {
-                // Codifica corretamente o valor do URL antes de atribuí-lo ao link
-                var encodedRedirectURL = decodeURIComponent(redirectURL);
+                // Codifica a URL caso contenha caracteres especiais
+                var encodedRedirectURL = encodeURIComponent(redirectURL);
+
+                // Decodifica a URL para evitar truncamentos ao criar o link
+                var decodedRedirectURL = decodeURIComponent(encodedRedirectURL);
+
+                // Configura o link do HTML
                 var link = document.getElementById('manualLink');
-                link.href = encodedRedirectURL;  // Configura o link com a URL corretamente decodificada
+                link.href = decodedRedirectURL;
             } else {
                 document.body.innerHTML = 'Parâmetro de URL inválido ou ausente.';
             }
