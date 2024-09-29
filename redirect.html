@@ -14,8 +14,10 @@
             var redirectURL = urlParams.get('url');
 
             if (redirectURL) {
+                // Codifica corretamente o valor do URL antes de atribuí-lo ao link
+                var encodedRedirectURL = decodeURIComponent(redirectURL);
                 var link = document.getElementById('manualLink');
-                link.href = redirectURL;  // Configura o link para o esquema personalizado
+                link.href = encodedRedirectURL;  // Configura o link com a URL corretamente decodificada
             } else {
                 document.body.innerHTML = 'Parâmetro de URL inválido ou ausente.';
             }
