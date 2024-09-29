@@ -2,32 +2,23 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Redirecting...</title>
+    <title>Redirecionando...</title>
     <script type="text/javascript">
         function redirect() {
             var urlParams = new URLSearchParams(window.location.search);
             var redirectURL = urlParams.get('url');
             
             if (redirectURL) {
-                // Attempt to redirect directly using window.location.href
+                // Redireciona diretamente para o URL obtido dos parâmetros.
                 window.location.href = redirectURL;
-
-                // Provide a fallback if the automatic redirect is blocked
-                setTimeout(function() {
-                    var confirmRedirect = confirm("Automatic redirection failed. Click OK to proceed.");
-                    if (confirmRedirect) {
-                        window.location.href = redirectURL;
-                    }
-                }, 2000); // Allow time for the browser to process before showing the prompt
             } else {
-                document.body.innerHTML = 'Invalid or missing URL parameter.';
+                document.body.innerHTML = 'Parâmetro de URL inválido ou ausente.';
             }
         }
-        window.onload = redirect;
     </script>
 </head>
 <body>
-    <p>Redirecting... If nothing happens, please allow pop-ups and click below:</p>
-    <button onclick="redirect()">Redirect Manually</button>
+    <p>Redirecionando... Se nada acontecer, clique no botão abaixo:</p>
+    <button onclick="redirect()">Clique aqui para Redirecionar Manualmente</button>
 </body>
 </html>
