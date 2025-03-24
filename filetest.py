@@ -2,23 +2,22 @@ import os
 import streamlit as st
 
 def main():
-    # Using backslashes in a raw string
-    file_path_back = r"\\cmhfps03\DATA\FLIGHT CENTER\International Planning\Intl Estimates\Estimates Tool\Data\QUOTES_Workflow_Report.xlsx"
-    # Using forward slashes
-    file_path_forward = "//cmhfps03/DATA/FLIGHT CENTER/International Planning/Intl Estimates/Estimates Tool/Data/QUOTES_Workflow_Report.xlsx"
+    # Check the UNC directory first
+    dir_path = r"\\cmhfps03\DATA"
+    st.write("Checking if UNC directory exists:", dir_path)
+    dir_exists = os.path.exists(dir_path)
+    st.write("Directory exists?", dir_exists)
     
-    st.write("Checking UNC file path (backslashes):", file_path_back)
-    exists_back = os.path.exists(file_path_back)
-    st.write("Exists (backslashes):", exists_back)
+    # Now check the full file path using UNC format (with backslashes)
+    file_path = r"\\cmhfps03\DATA\FLIGHT CENTER\International Planning\Intl Estimates\Estimates Tool\Data\QUOTES_Workflow_Report.xlsx"
+    st.write("Checking UNC file path (backslashes):", file_path)
+    file_exists = os.path.exists(file_path)
+    st.write("File exists?", file_exists)
     
-    st.write("Checking UNC file path (forward slashes):", file_path_forward)
-    exists_forward = os.path.exists(file_path_forward)
-    st.write("Exists (forward slashes):", exists_forward)
-    
-    if not exists_back and not exists_forward:
-        st.error("File not found using either UNC format. Please verify the UNC path and permissions.")
+    if not file_exists:
+        st.error("File not found using UNC path! Please verify the UNC path and that you have permissions to access it.")
     else:
-        st.success("File found using UNC format!")
-
+        st.success("File found using UNC path!")
+    
 if __name__ == "__main__":
     main()
