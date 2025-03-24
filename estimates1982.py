@@ -2,229 +2,111 @@ import streamlit as st
 import pandas as pd
 from dateutil import parser
 from collections import defaultdict
+import datetime
+import requests
 
-# Initialize session state variables before any widget is created
-if "widget_key" not in st.session_state:
-    st.session_state.widget_key = 0
-if "explanation_text" not in st.session_state:
-    st.session_state.explanation_text = ""
-if "ai_text" not in st.session_state:
-    st.session_state.ai_text = ""
-if "table_df" not in st.session_state:
-    st.session_state.table_df = None
+# ----------------------------
+# Cache the entire Excel file so it's loaded only once
+# ----------------------------
+@st.cache_data
+def load_all_reservations() -> pd.DataFrame:
+    file_path = r"G:\Product Delivery\GITP\Reports\New\QUOTES_Workflow_Report.xlsx"
+    try:
+        df = pd.read_excel(file_path)
+    except Exception as e:
+        st.error(f"Error reading Excel file: {e}")
+        return pd.DataFrame()
+    # Strip extra whitespace from column names
+    df.columns = df.columns.str.strip()
+    return df
 
-# Set page configuration (must be the first Streamlit command)
-st.set_page_config(layout="wide", page_title="Estimates Table Planning Processor")
+# ----------------------------
+# New Module: Load Reservation with Debugging
+# ----------------------------
+def load_reservation(res_number: str) -> pd.DataFrame:
+    st.write("Debug: Entered load_reservation()")
+    df = load_all_reservations()
+    st.write("Debug: Loaded file from cache. Total rows:", len(df))
+    st.write("Debug: Available columns:", df.columns.tolist())
+    
+    if "Reservation ID" not in df.columns:
+        st.error("Column 'Reservation ID' not found in the file!")
+        return pd.DataFrame()
+    
+    filtered_df = df[df["Reservation ID"].astype(str).str.contains(res_number, case=False, na=False)]
+    st.write(f"Debug: Found {len(filtered_df)} rows matching reservation number '{res_number}'.")
+    st.write("Debug: Preview of filtered rows:", filtered_df.head(5))
+    
+    mapped = pd.DataFrame({
+        "req_number": filtered_df.get("Request ID-Leg Order Nbr", pd.Series(["0"] * len(filtered_df))),
+        "date": filtered_df.get("EDT Date L", pd.Series(["0"] * len(filtered_df))),
+        "dep": filtered_df.get("DEP", pd.Series(["0"] * len(filtered_df))),
+        "arr": filtered_df.get("ARR", pd.Series(["0"] * len(filtered_df))),
+        "etd": filtered_df.get("ETD L", pd.Series(["0"] * len(filtered_df))),
+        "eta": filtered_df.get("ETA L", pd.Series(["0"] * len(filtered_df))),
+        "req_ac": filtered_df.get("REQ A/C", pd.Series(["0"] * len(filtered_df))),
+        "bt": filtered_df.get("BT", pd.Series(["0"] * len(filtered_df))),
+        "contracted_ac": filtered_df.get("GUARANTEED A/C", filtered_df.get("REQ A/C", pd.Series(["0"] * len(filtered_df)))),
+        "product": filtered_df.get("Contract Product Name", pd.Series(["0"] * len(filtered_df))),
+        "program": filtered_df.get("Request Program", pd.Series(["NetJets U.S."] * len(filtered_df))),
+        "cont_hrs": filtered_df.get("Overridden Trip Time", pd.Series(["0"] * len(filtered_df)))
+    })
+    st.write("Debug: Mapping complete. Preview of mapped DataFrame:", mapped.head(5))
+    return mapped
 
-# Inject custom CSS for sidebar and main content
-st.markdown(
-    """
-    <style>
-    /* Sidebar font size */
-    [data-testid="stSidebar"] * {
-        font-size: 10px !important;
+# ----------------------------
+# Function to call OpenAI API to rewrite AI Conclusion text
+# ----------------------------
+def rewrite_text(text):
+    url = "https://api.openai.com/v1/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer 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"
     }
-    /* Input text areas */
-    .stTextArea > div > textarea {
-        font-size: 6px !important;
-        line-height: 1.1 !important;
+    data = {
+         "model": "gpt-4o-mini",
+         "messages": [      
+             {
+                "role": "system",
+                "content": (
+                    "Rewrite the following text in a clear, detailed, and friendly manner for a non-technical audience. "
+                    "Explain step-by-step how the departure and arrival endpoints are evaluated, how tech stops are handled "
+                    "(tech stops are not included in the overall average), the role of block time, and how the overall waiver decision, discounts, or upcharge option are determined."
+                )
+             },
+             {"role": "user", "content": text}
+         ],
+         "temperature": 0.7,
+         "max_tokens": 350
     }
-    /* DataFrame table font size */
-    .stDataFrame table, .stDataFrame th, .stDataFrame td {
-        font-size: 8px !important;
-    }
-    /* Row details table with larger text */
-    .row-details-table table, .row-details-table th, .row-details-table td {
-         font-size: 12px !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+    response = requests.post(url, headers=headers, json=data, verify=False)
+    if response.status_code == 200:
+         return response.json()["choices"][0]["message"]["content"].strip()
+    else:
+         return f"Error rewriting text: {response.text}"
 
 # ----------------------------
-# Sidebar Instructions and Reference Information
+# Helper Functions and Mappings
 # ----------------------------
-st.sidebar.header("Instructions")
-st.sidebar.write(
-    """
-    **Overview:**
-
-    This tool (Estimates Table Planning Processor) processes ferry waiver reservation data.
-    Paste your tab-separated table data into the **Input Table Data** field below.
-    
-    **How It Works:**
-    - The tool auto-detects and skips the header row.
-    - It reads the PROGRAM and PRODUCT values from the input if provided; otherwise, they default to **NetJets U.S.** and an empty product.
-    - It calculates ferry waiver flags based on airport regions and aircraft groups.
-    - It applies discount rules only for reservations on the NetJets U.S. program and only if the requested aircraft type matches the contracted aircraft type.
-      *If the types differ, no discount is applied – please check the interchange rate in IJet.*
-    - The row details table shows wrapped text in the REASON column for full visibility.
-    - An aggregated reservation explanation and an AI conclusion are generated.
-    
-    **How to Use:**
-    1. Paste your table data into **Input Table Data**.
-    2. (Optional) Paste discount rule examples into **Discount Definitions**.
-    3. Click **Process Table**.
-    4. Use **Reset** to clear all inputs.
-
-    **Note on Estimates:**
-    - If the reservation is eligible for an upcharge, you can generate two estimates:
-       1. One with the upcharge (to meet the 3‑hour daily minimum).
-       2. One using standard ferry fees.
-    - If it’s not eligible, only the ferry fees estimate applies.
-    """
-)
-
-st.sidebar.subheader("Region Mapping - NetJets U.S.")
-st.sidebar.markdown(
-    """
-    | **Group** | **ICAO Prefixes**                                                     |
-    |-----------|-----------------------------------------------------------------------|
-    | CSA       | K                                                                     |
-    | Group I   | C, MM, MY, MB, MK, TN, TB, TJ, TI, TQ, TR, TT, TU, TV, MT, MU, MW, MZ, MG, MH, MP, MR, MS, PA |
-    | Group II  | PH                                                                    |
-    | Group III | BG, BI, EH, EI, EK, EB, ED, EE, EF, EG, EL, EN, EP, ES, EV, EY, LF, LG, LH, LI, LJ, LK, LL, LM, LO, LP, LQ, LR, LS, LT, LU, LW, LY, LZ, GM |
-    | Group IV  | SA, SB, SC, SE, SG, SK, SL, SM, SO, SP, SU, SV, SY, ZB, ZG, ZH, ZL, ZS, ZY, VA, VE, VI, VO |
-    """
-)
-
-st.sidebar.subheader("Region Mapping - NetJets Europe")
-st.sidebar.markdown(
-    """
-    | **Zone / Group**             | **Applicable Aircraft Types**                                   | **Covered Areas / Countries**                                                                                                                                                                                                                                                                      |
-    |------------------------------|-----------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-    | Collective Service Area (CSA)| All aircraft                                                    | Sector A: Austria, Belgium, Czech Republic, Croatia, Denmark, Finland, France, Germany, Greece (excluding Greek Islands), Hungary, Ireland, Italy, Luxembourg, Malta, Netherlands, Norway, Poland, Portugal (excluding Azores & Madeira), Slovakia, Slovenia, Spain (excluding Canary & Balearic Islands), Sweden, Switzerland, United Kingdom<br>Sector B: Albania, Bosnia & Herzegovina, Bulgaria, Cyprus, Estonia, Faroe Islands, Greek Islands only, Iceland, Kosovo, Latvia, Lithuania, Macedonia, Moldova, Montenegro, Morocco, Portugal (Azores & Madeira only), Russia (restricted cities), Romania, Serbia, Spain (Canary & Balearic Islands only), Israel (Tel Aviv only), Libya (Tripoli only), Tunisia (Tunis & Monastir only), Turkey, Ukraine |
-    | Ferry Waiver Zone 1          | Citation Latitude, Challenger 350, Falcon 2000EX, Challenger 650, Global 5500, Global 6000 | Destinations outside the CSA covering parts of the Middle East and Eastern Europe – e.g., Armenia, Azerbaijan, Egypt (Cairo, Hurghada, Sharm El-Sheikh), Georgia, and areas in Russia west of 62°50’ (excluding Kaliningrad, Moscow & St. Petersburg)                                       |
-    | Ferry Waiver Zone 2          | Challenger 350, Falcon 2000EX, Challenger 650, Global 5500, Global 6000 | Destinations in the Gulf region – e.g., Bahrain, Kazakhstan (e.g., Almaty, Astana), Kuwait, Oman, Qatar, Saudi Arabia, United Arab Emirates                                                                                                                       |
-    | Ferry Waiver Long Haul Zone 1A | Challenger 650, Global 5500, Global 6000                         | Long-haul routes from the CSA to North America – e.g., flights to/from Canada (Montreal, Toronto) and U.S. Eastern states (e.g., New Jersey, Rhode Island, Connecticut, Massachusetts, New Hampshire, New York, Vermont, Maine)                                                       |
-    | Ferry Waiver Long Haul Zone 1B | Global 5500, Global 6000                                          | Long-haul routes from the CSA to Continental U.S., Canada, Mexico, Bermuda, and the Caribbean Islands                                                                                                                                    |
-    | Ferry Waiver Long Haul Zone 2 | Global 6000                                                       | Routes to/from U.S. Alaska and Hawaii, as well as South American destinations (e.g., Brazil, Argentina, Bolivia, Chile, Colombia, Ecuador, French Guiana, Guyana, Paraguay, Peru, Suriname, Uruguay)                                                              |
-    """
-)
-
-st.sidebar.subheader("Product Details")
-product_table_md = """
-| **New Name**   | **Old Product Names**                  | **Program** | **Product(s)**                            | **No-Fly Days** | **Characteristics**                                                                                          |
-|----------------|----------------------------------------|-------------|-------------------------------------------|-----------------|--------------------------------------------------------------------------------------------------------------|
-| Share365       | Share                                  | Share       | None                                      | 0               | NJ Owner contract. Eligible for ferry waiver for FWG 1; standard PPD premium applies.                       |
-| Share365e      | QS Executive Share                     | Share       | QS Executive (e)                          | 0               | NJ Owner contract with QS Executive discount terms.                                                        |
-| Share365i      | Interim Lease                          | Share       | Interim (i)                               | 0               | NJ Interim Lease contract. Similar to NJ Owner, but with interim lease terms.                              |
-| Share365ei     | QS Executive Interim Lease             | Share       | QS Executive (e) + Interim (i)              | 0               | NJ Interim Lease with QS Executive terms.                                                                    |
-| Share365l      | Standard / Long-Term Lease             | Share       | Lease (l)                                 | 10              | NJ Lease / Pre-paid Lease. Hourly rate includes OHR and Fuel; additional fees may apply.                     |
-| Share365el     | QS Executive Standard / Long-Term Lease  | Share       | QS Executive (e) + Lease (l)                | 10              | NJ Lease with QS Executive discount.                                                                         |
-| Share355l      | 25-Hour Lease                          | Share       | Lease (l)                                 | 10              | Standard 25-hr Lease with PPD restrictions; pays a 1.25 PPD premium.                                         |
-| Share355lx     | 25-Hour Cross-Country Lease            | Share       | Lease (l) + Cross-Country (x)               | 10              | 25-Hour Cross-Country Lease.                                                                                   |
-| Share355e      | QS Executive 25-Hour Lease             | Share       | QS Executive (e) + Lease (l)                | 10              | QS Executive terms on a 25-Hour Lease.                                                                         |
-| Share355el     | QS Executive 25-Hour Cross-Country Lease| Share       | QS Executive (e) + Lease (l) + Cross-Country (x)| 10            | QS Executive terms on a 25-Hour Cross-Country Lease.                                                           |
-| Card365        | Promo Card                             | Card        | None                                      | 0               | Promo Card for special cases.                                                                                  |
-| Card355i       | Interim Card                           | Card        | Interim (i)                               | 10              | Interim Card for owners awaiting lease activation.                                                           |
-| Card355ci      | Interim Combo Card                     | Card        | Combo (c) + Interim (i)                     | 10              | Interim Combo Card offering multiple benefits.                                                                 |
-| Card355ix      | Interim Cross-Country Card             | Card        | Interim (i) + Cross-Country (x)             | 10              | Interim Cross-Country Card.                                                                                    |
-| Card320        | Standard Card                          | Card        | None                                      | 45              | Standard Card with basic access.                                                                             |
-| Card320c       | Combo Card                             | Card        | Combo (c)                                 | 45              | Combo Card combining features.                                                                               |
-| Card320e       | QS Executive Card                      | Card        | QS Executive (e)                          | 45              | QS Executive Card with enhanced benefits.                                                                    |
-| Card320x       | Cross-Country Card                     | Card        | Cross-Country (x)                         | 45              | Cross-Country Card for long-haul flights.                                                                      |
-| Card320ex      | Cross-Country QS Executive Card        | Card        | QS Executive (e) + Cross-Country (x)        | 45              | QS Executive benefits on a Cross-Country Card.                                                                 |
-| Card275        | One Card                               | Card        | None                                      | 90              | One Card for single-use scenarios.                                                                             |
-| Card275x       | Cross-Country One Card                 | Card        | Cross-Country (x)                         | 90              | Cross-Country One Card for extended trips.                                                                     |
-"""
-st.sidebar.markdown(product_table_md)
-
-st.sidebar.subheader("Ferry Waiver Rules")
-st.sidebar.markdown(
-    """
-    **Ferry Waiver Program Rules:**
-
-    - **Positioning Fees:** When operating under Ferry Waiver, the Owner does not pay ferry hours, fuel, or flat fees on the positioning leg.
-      *Note: The tool estimates positioning time at a country level by examining the furthest airport in each country from the CSA. For a more precise estimate, use the F5 function on the timeline in IJet and override the time if needed.*
-    
-    - **Global Service Area Zone (GL7500 Owners):**
-      - All Bombardier Global 7500 Owners and Leases qualify for the Global Service Area.
-      - Defined as the contiguous U.S., select cities in Canada, and all locations in Group III (excluding Group I/II countries).
-      - Travel within this area is always ferry‑free.
-      - For flights outside the area, the flight is ferry‑free if the single flight begins and/or ends in the Global Service Area; or, for multi‑segment trips, if the entire trip meets the criteria (same aircraft, continuous itinerary, averaging at least 3 occupied hours per day).
-    
-    - **NJA Ferry Waiver Zones (excluding GL7500 Owners):**
-      - Refer to the Ferry Waiver Program Maps for detailed zone information.
-      - *Note:* For non‑GL7500 Owners requesting the GL7500, executive leadership approval is required. The GL7500 falls under its own group (Group 5) covering global operations.
-    
-    - **NJE Ferry Waiver Zones:**
-      - See the Ferry Waiver Program Brochure for details.
-    
-    - **3 Hours per Day Rule:**
-      - The reservation must be a continuous trip (all airport codes align, the same requested aircraft type is used, and the same program applies).
-      - The average flight time per day (calculated from the local ETD date of the first leg to that of the final leg) must be at least 3 hours.
-      - If the average is below 3 hours, an additional upcharge is required.
-    
-    - **High Efficiency Discount:**
-      - For Signature Series A/C (or upgrades to G-450/G-IV), the base discount is:
-         - 20% off for flight times between 2.5 and 3.4 hrs.
-         - 30% off for flight times between 3.5 and 4.4 hrs.
-         - 40% off for flight times greater than 4.5 hrs.
-      - **Double Discount:** If the discount definitions text (entered in Discount Definitions) includes the word “doubled” (case‑insensitive) and both the first leg departs from and the last leg arrives at a designated High Efficiency Airport (KTEB, KHPN, KIAD, KPBI, KMDW, KDAL, KVNY, KSJC, KLAS, KSFO, KBOS, KAPF, KSDL, KPDK) within the same calendar day, then the discount percentage is doubled.
-      - **Important:** If the double discount condition is not met (or “doubled” is not present), then only the base discount applies.
-    
-    - **Exceptions & Leadership Approval:**
-      - Tech stops within the CSA may allow the waiver to still apply.
-      - Passenger drop‑offs/pick‑ups under 60 minutes are generally waived.
-      - Any exceptions to these rules require leadership approval.
-    """
-)
-
-# Define High Efficiency Airports for discount doubling
-HE_AIRPORTS = {"KTEB", "KHPN", "KIAD", "KPBI", "KMDW", "KDAL", "KVNY", "KSJC", "KLAS", "KSFO", "KBOS", "KAPF", "KSDL", "KPDK"}
-
-# ----------------------------
-# Aircraft Mapping (common) - already defined above (repeated for clarity)
-# ----------------------------
-aircraft_mapping = {
-    "BE-400A": "Beechcraft Beechjet 400A",
-    "CE-560": "Cessna Citation V",
-    "CE-560E": "Cessna Citation Ultra",
-    "CE-560EP": "Cessna Citation Encore",
-    "EMB-505S": "Embraer Phenom 300S",
-    "EMB-505E": "Embraer Phenom 300E",
-    "CE-560XL": "Cessna Citation Excel",
-    "CE-560XLS": "Cessna Citation XLS",
-    "CE-560XLSA": "Cessna Citation XLS+",
-    "HS-125-750": "Hawker 750",
-    "HS-125-800XPC": "Hawker 800XPC",
-    "HS-125-900XP": "Hawker 900XP",
-    "CE-680": "Cessna Citation Sovereign",
-    "CE-680AS": "Cessna Citation Sovereign+",
-    "EMB-545-MOD": "Embraer Praetor 500",
-    "CE-700": "Cessna Citation Longitude",
-    "CL3500": "Bombardier Challenger 3500",
-    "CL-350S": "Bombardier Challenger 350",
-    "DA-2000": "Dassault Falcon 2000",
-    "DA-2EASY": "Dassault Falcon 2000S",
-    "CL-650S": "Bombardier Challenger 650",
-    "GIV-SP": "Gulfstream IV-SP",
-    "G-450": "Gulfstream G450",
-    "GV": "Gulfstream V",
-    "GL5500": "Bombardier Global 5500",
-    "GL5000S": "Bombardier Global 5000",
-    "GL6000S": "Bombardier Global 6000",
-    "GL7500": "Bombardier Global 7500",
-    "GL8000": "Bombardier Global 8000"
-}
-
-# ----------------------------
-# U.S. Region Mapping
-# ----------------------------
-CSA_AIRPORTS = {
+CANADIAN_CSA = {
     "CYHM", "CYOO", "CYSA", "CYYZ", "CYGK", "CYOW", "CYSN", "CYZD",
     "CYHU", "CYPQ", "CYTZ", "CYZR", "CYKF", "CYQA", "CYUL", "CZBB",
     "CYKZ", "CYQG", "CYVR", "CYMX", "CYQS", "CYXU"
 }
+
+def is_csa(icao: str) -> bool:
+    icao = icao.strip().upper()
+    return icao.startswith("K") or icao in CANADIAN_CSA
+
 region_mapping_us = {
-    "C": "Group I", "K": "CSA", "MM": "Group I", "MY": "Group I", "MB": "Group I",
+    "CY": "Group I",
+    "C": "Group I", 
+    "MM": "Group I", "MY": "Group I", "MB": "Group I",
     "MK": "Group I", "TN": "Group I", "TB": "Group I", "TJ": "Group I", "TI": "Group I",
     "TQ": "Group I", "TR": "Group I", "TT": "Group I", "TU": "Group I", "TV": "Group I",
     "MT": "Group I", "MU": "Group I", "MW": "Group I", "MZ": "Group I", "MG": "Group I",
     "MH": "Group I", "MP": "Group I", "MR": "Group I", "MS": "Group I", "PA": "Group I",
-    "PH": "Group II",
+    "PH": "Group II",  
     "BG": "Group III", "BI": "Group III", "EH": "Group III", "EI": "Group III", "EK": "Group III",
     "EB": "Group III", "ED": "Group III", "EE": "Group III", "EF": "Group III", "EG": "Group III",
     "EL": "Group III", "EN": "Group III", "EP": "Group III", "ES": "Group III", "EV": "Group III",
@@ -239,64 +121,79 @@ region_mapping_us = {
     "VE": "Group IV", "VI": "Group IV", "VO": "Group IV"
 }
 
-# ----------------------------
-# NetJets Europe Region Mapping Function
-# ----------------------------
-def get_region_eu(icao):
-    icao = icao.strip().upper()
-    for prefix in ["HE", "HU", "HR"]:
-        if icao.startswith(prefix):
-            return "Group I"
-    for prefix in ["UG", "UY", "UU"]:
-        if icao.startswith(prefix):
-            return "Group II"
-    for prefix in ["PA", "PH", "SB"]:
-        if icao.startswith(prefix):
-            return "Group IV"
-    if icao.startswith("K") or icao.startswith("C"):
-        return "Group III"
-    if icao.startswith("E") or icao.startswith("L"):
-        return "CSA"
-    return "NO GROUP"
+def get_acceptable_region_groups(requested_ac: str) -> set:
+    requested_ac_group = {
+        "EMB-505S": "Group I",
+        "EMB-505E": "Group I",
+        "CE-560XLS": "Group I",
+        "CE-560XLSA": "Group I",
+        "CE-680": "Group I",
+        "CE-680AS": "Group I",
+        "CL-350S": "Group II",
+        "CL3500": "Group II",
+        "CE-700": "Group III",
+        "CL-650S": "Group III",
+        "GL5500": "Group III",
+        "GL6000S": "Group IV",
+        "GL6000": "Group IV",
+        "GL7500": "GSA"
+    }
+    group = requested_ac_group.get(requested_ac, None)
+    if group is None:
+        return set()
+    if group == "Group I":
+        return {"Group I"}
+    elif group == "Group II":
+        return {"Group I", "Group II"}
+    elif group == "Group III":
+        return {"Group I", "Group II", "Group III"}
+    elif group == "Group IV":
+        return {"Group I", "Group II", "Group III"}
+    elif group == "GSA":
+        return {"Group III"}
+    return set()
 
-# ----------------------------
-# Aircraft Groups Mapping (common to both)
-# ----------------------------
-aircraft_groups = {
-    "BE-400A": "Group I",
-    "CE-560": "Group I",
-    "CE-560E": "Group I",
-    "CE-560EP": "Group I",
-    "EMB-505S": "Group I",
-    "EMB-505E": "Group I",
-    "CE-560XL": "Group I",
-    "CE-560XLS": "Group I",
-    "CE-560XLSA": "Group I",
-    "HS-125-750": "Group I",
-    "HS-125-800XPC": "Group I",
-    "HS-125-900XP": "Group I",
-    "CE-680": "Group I",
-    "CE-680AS": "Group I",
-    "CL-350S": "Group II",
-    "CL3500": "Group II",
-    "CE-700": "Group III",
-    "CL-650S": "Group III",
-    "DA-2000": "Group III",
-    "DA-2EASY": "Group III",
-    "EMB-545-MOD": "Group III",
-    "GIV-SP": "Group III",
-    "G-450": "Group III",
-    "GL5500": "Group IV",
-    "GL5000S": "Group IV",
-    "GL6000S": "Group IV",
-    "GL7500": "Group IV",
-    "GL8000": "Group IV",
-    "GV": "Group IV"
+def qualifies_for_fw(icao: str, requested_ac: str) -> bool:
+    icao = icao.strip().upper()
+    if is_csa(icao):
+        return True
+    acceptable = get_acceptable_region_groups(requested_ac)
+    prefix = icao[:2]
+    region = region_mapping_us.get(prefix, "NO GROUP")
+    return region in acceptable
+
+def is_gsa(icao: str) -> bool:
+    icao = icao.strip().upper()
+    if is_csa(icao):
+        return True
+    prefix = icao[:2]
+    return region_mapping_us.get(prefix, "NO GROUP") == "Group III"
+
+def is_nje_csa(icao: str) -> bool:
+    icao = icao.strip().upper()
+    prefix = icao[:2]
+    return (region_mapping_us.get(prefix, "NO GROUP") == "Group III") or (prefix == "GM")
+
+# Aircraft Mapping
+aircraft_mapping = {
+    "EMB-505S": "Embraer Phenom 300S",
+    "EMB-505E": "Embraer Phenom 300E",
+    "CE-560XLS": "Cessna Citation XLS",
+    "CE-560XLSA": "Cessna Citation XLS+",
+    "CE-680": "Cessna Citation Sovereign",
+    "CE-680AS": "Cessna Citation Sovereign+",
+    "CL-350S": "Bombardier Challenger 350",
+    "CL3500": "Bombardier Challenger 350",
+    "CE-700": "Cessna Citation Longitude",
+    "CL-650S": "Bombardier Challenger 650",
+    "GL5500": "Bombardier Global 5500",
+    "GL5000S": "Bombardier Global 5000",
+    "GL6000S": "Bombardier Global 6000",
+    "GL7500": "Bombardier Global 7500",
+    "GL8000": "Bombardier Global 8000"
 }
 
-# ----------------------------
-# Product Mapping Dictionary
-# ----------------------------
+# Product Mapping
 product_mapping = {
     "Share365": "NJ Owner contract. Eligible for ferry waiver for FWG 1; standard PPD premium applies.",
     "Share365i": "NJ Interim Lease contract. Similar to NJ Owner, but with interim lease terms.",
@@ -304,21 +201,22 @@ product_mapping = {
     "Share355l": "Standard 25-hr Lease with PPD restrictions; pays a 1.25 PPD premium.",
     "NJ X-Country": "30% discount on Challenger 350 for 3.5+ hrs; tech stops combine time.",
     "NJ Transatlantic": "40% discount on Global 5000S/6000S/7500 for 5+ hrs; tech stops combine time.",
-    "High Efficiency": "Requires at least 1 pax; first/last flight in NJA CSA; must use contracted aircraft type.",
-    "Expanded High Efficiency": "Restricted to flights in NJUS CSA.",
-    "Limited High Efficiency": "Capped: 20% for 2.5-3.4 hrs, 30% for 3.5-4.4 hrs, 40% for 4.5+ hrs."
+    "High Efficiency": "High Efficiency discount as per defined rules.",
+    "Expanded High Efficiency": "Expanded High Efficiency discount as per defined rules.",
+    "Limited High Efficiency": "Limited High Efficiency discount as per defined rules."
 }
 
-# ----------------------------
-# Calculate Discount Function
-# ----------------------------
 def calculate_discount(row):
     prog = row.get("program", "").strip().lower()
     if prog != "netjets u.s.":
         return "0%"
-    if row.get("contracted_ac"):
+    try:
         req_ac = row["req_ac"].strip().upper()
         cont_ac = row["contracted_ac"].strip().upper()
+    except KeyError:
+        return "0%"
+    prod = row.get("product", "").strip().lower()
+    if prod == "high efficiency":
         if req_ac != cont_ac:
             return "0%"
     try:
@@ -327,33 +225,277 @@ def calculate_discount(row):
         bt = 0.0
     dep = row["dep"].strip().upper()
     arr = row["arr"].strip().upper()
-    dep_region = "CSA" if (dep in CSA_AIRPORTS or dep.startswith("K")) else region_mapping_us.get(dep[:2], "NO GROUP")
-    arr_region = "CSA" if (arr in CSA_AIRPORTS or arr.startswith("K")) else region_mapping_us.get(arr[:2], "NO GROUP")
-    if dep_region != "CSA" and arr_region != "CSA":
-        return "0%"
-    prod = row["product"].strip().lower()
-    if "high efficiency" in prod:
+    if prod == "high efficiency":
+        if "pax" in row and int(row["pax"]) < 1:
+            return "0%"
+        if req_ac in ["GL6000S", "GL6000", "GL5000S", "GL5500"]:
+            if ((is_csa(dep) and is_nje_csa(arr)) or (is_csa(arr) and is_nje_csa(dep))):
+                if bt >= 5.0:
+                    return "40%"
+            return "0%"
+        elif req_ac == "CE-700":
+            if not (is_csa(dep) or is_csa(arr)):
+                return "0%"
+            if 2.5 <= bt < 3.5:
+                return "20%"
+            elif bt >= 3.5:
+                return "30%"
+            else:
+                return "0%"
+        elif req_ac in ["CL-350S", "CL3500"]:
+            if not (is_csa(dep) or is_csa(arr)):
+                return "0%"
+            if bt >= 3.5:
+                return "30%"
+            else:
+                return "0%"
+        else:
+            return "0%"
+    elif prod == "expanded high efficiency":
+        if "pax" in row and int(row["pax"]) < 1:
+            return "0%"
+        signature_series = {"EMB505S", "CE680AS", "EMB545MOD", "CE700", "CL-350S", "CL3500",
+                            "CL650S", "G450", "GL5000S", "GL5500", "GL6000S", "GL7500"}
+        if req_ac not in signature_series:
+            return "0%"
+        if not (is_csa(dep) or is_csa(arr)):
+            return "0%"
+        airport_pricing_airports = {"KTEB", "KHPN", "KIAD", "KPBI", "KMDW", "KDAL",
+                                    "KVNY", "KSJC", "KLAS", "KSFO", "KBOS", "KAPF",
+                                    "KSDL", "KPDK"}
+        is_airport_pricing = (dep in airport_pricing_airports and arr in airport_pricing_airports)
         if bt < 2.5:
             return "0%"
-        elif bt < 3.5:
-            return "20%"
-        elif bt < 4.5:
-            return "30%"
+        if 2.5 <= bt < 3.5:
+            return "40%" if is_airport_pricing else "20%"
+        elif 3.5 <= bt < 4.5:
+            return "60%" if is_airport_pricing else "30%"
+        elif bt >= 4.5:
+            return "80%" if is_airport_pricing else "40%"
         else:
+            return "0%"
+    elif prod == "limited high efficiency":
+        if "pax" in row and int(row["pax"]) < 1:
+            return "0%"
+        signature_series = {"EMB505S", "CE680AS", "EMB545MOD", "CE700", "CL-350S", "CL3500",
+                            "CL650S", "G450", "GL5000S", "GL5500", "GL6000S", "GL7500"}
+        if req_ac not in signature_series:
+            return "0%"
+        if not (is_csa(dep) or is_csa(arr)):
+            return "0%"
+        if bt < 2.5:
+            return "0%"
+        if 2.5 <= bt < 3.5:
+            return "20%"
+        elif 3.5 <= bt < 4.5:
+            return "30%"
+        elif bt >= 4.5:
             return "40%"
-    if row["req_ac"].strip().upper() in ["CL-350S", "CL3500"]:
+        else:
+            return "0%"
+    if req_ac in ["GL6000S", "GL6000"]:
+        if not (qualifies_for_fw(dep, req_ac) and qualifies_for_fw(arr, req_ac)):
+            return "0%"
+    elif req_ac == "GL7500":
+        if not ((is_gsa(dep) or is_csa(dep)) or (is_gsa(arr) or is_csa(arr))):
+            return "0%"
+    else:
+        if not (qualifies_for_fw(dep, req_ac) and qualifies_for_fw(arr, req_ac)):
+            return "0%"
+    if req_ac in ["CL-350S", "CL3500"]:
         if bt >= 3.5:
             return "30%"
     return "0%"
 
-# ----------------------------
-# Process Table Function
-# ----------------------------
-def process_table(input_data: str, discount_def: str, default_program="NetJets U.S."):
+def build_explanation(row, overall_message, overall_waiver_decision, req_ac, is_tech_stop=False):
+    dep = row["dep"].strip().upper()
+    arr = row["arr"].strip().upper()
+    dep_qual = "CSA" if is_csa(dep) else region_mapping_us.get(dep[:2], "NO GROUP")
+    arr_qual = "CSA" if is_csa(arr) else region_mapping_us.get(arr[:2], "NO GROUP")
+    bt_str = row.get("bt", "N/A")
+    try:
+        bt = float(bt_str)
+    except:
+        bt = 0.0
+    product = row.get("product", "").strip()
+    prod_desc = product_mapping.get(product, "No product info available")
+    discount = row.get("discount", "0%")
+    discount_msg = ""
+    if discount != "0%":
+        if product.lower() == "limited high efficiency":
+            if bt >= 4.5:
+                discount_msg = f"A discount of {discount} was applied because the block time of {bt} hrs exceeds the threshold of 4.5 hrs."
+            elif 3.5 <= bt < 4.5:
+                discount_msg = f"A discount of {discount} was applied because the block time of {bt} hrs is more than 3.5 hrs but less than 4.5 hrs."
+            elif 2.5 <= bt < 3.5:
+                discount_msg = f"A discount of {discount} was applied because the block time of {bt} hrs is more than 2.5 hrs but less than 3.5 hrs."
+        elif product.lower() == "high efficiency":
+            if req_ac in ["GL6000S", "GL6000", "GL5000S", "GL5500"]:
+                if bt >= 5.0:
+                    discount_msg = f"A discount of {discount} was applied because the block time of {bt} hrs exceeds the threshold of 5.0 hrs."
+            elif req_ac == "CE-700":
+                if bt >= 3.5:
+                    discount_msg = f"A discount of {discount} was applied because the block time of {bt} hrs exceeds the threshold of 3.5 hrs."
+                elif 2.5 <= bt < 3.5:
+                    discount_msg = f"A discount of {discount} was applied because the block time of {bt} hrs is more than 2.5 hrs but less than 3.5 hrs."
+            elif req_ac in ["CL-350S", "CL3500"]:
+                if bt >= 3.5:
+                    discount_msg = f"A discount of {discount} was applied because the block time of {bt} hrs exceeds the threshold of 3.5 hrs."
+        elif product.lower() == "expanded high efficiency":
+            if bt >= 4.5:
+                discount_msg = f"A discount of {discount} was applied because the block time of {bt} hrs exceeds the threshold of 4.5 hrs."
+            elif 3.5 <= bt < 4.5:
+                discount_msg = f"A discount of {discount} was applied because the block time of {bt} hrs is more than 3.5 hrs but less than 4.5 hrs."
+            elif 2.5 <= bt < 3.5:
+                discount_msg = f"A discount of {discount} was applied because the block time of {bt} hrs is more than 2.5 hrs but less than 3.5 hrs."
+    else:
+        discount_msg = "No discount was applied because the block time did not meet the required threshold."
+    tech_stop_msg = " This flight is a tech stop and is not included in the overall average calculation." if is_tech_stop else ""
+    explanation = (
+        f"{overall_message} (Overall waiver: {overall_waiver_decision}). "
+        f"Flight {row['req_number']}: Departure {dep} qualifies as {dep_qual}; "
+        f"Arrival {arr} qualifies as {arr_qual}. Block time: {bt_str} hrs. "
+        f"Aircraft: {req_ac}. Product: {product}. Characteristics: {prod_desc}.{tech_stop_msg} {discount_msg}"
+    )
+    return explanation
+
+def check_tech_stops(legs) -> bool:
+    return True
+
+def rule_n4_eligible(legs, requested_ac: str):
+    sorted_legs = sorted(legs, key=lambda r: parser.parse(r["date"]))
+    first_leg = sorted_legs[0]
+    last_leg = sorted_legs[-1]
+    if is_csa(first_leg["dep"]) and is_csa(last_leg["arr"]):
+        return (True, "Reservation originates and terminates in CSA.")
+    exit_date = None
+    return_date = None
+    for leg in sorted_legs:
+        if not is_csa(leg["dep"]):
+            exit_date = parser.parse(leg["date"])
+            break
+    if exit_date is None:
+        return (True, "Reservation remains in CSA.")
+    for leg in sorted_legs:
+        leg_date = parser.parse(leg["date"])
+        if leg_date > exit_date and is_csa(leg["dep"]):
+            return_date = leg_date
+            break
+    if return_date is None:
+        return (False, "Reservation leaves CSA and does not return.")
+    num_days = (return_date.date() - exit_date.date()).days + 1
+    total_bt = sum(float(leg["bt"]) for leg in sorted_legs if exit_date <= parser.parse(leg["date"]) <= return_date)
+    avg_bt = total_bt / num_days if num_days > 0 else 0.0
+    if avg_bt >= 3.0:
+        return (True, f"Reservation qualifies with an average of {avg_bt:.2f} hrs/day over {num_days} days.")
+    else:
+        return (False, f"Average block time {avg_bt:.2f} hrs/day is below required 3 hrs/day.")
+
+def rule_n5_eligible(legs, requested_ac: str):
+    sorted_legs = sorted(legs, key=lambda r: parser.parse(r["date"]))
+    first_leg = sorted_legs[0]
+    last_leg = sorted_legs[-1]
+    dep_ok = is_csa(first_leg["dep"]) or qualifies_for_fw(first_leg["dep"], requested_ac)
+    arr_ok = is_csa(last_leg["arr"]) or qualifies_for_fw(last_leg["arr"], requested_ac)
+    if not (is_csa(first_leg["dep"]) or is_csa(last_leg["arr"])):
+        return (False, "Neither endpoint is in CSA; Rule n5 does not apply.")
+    first_date = parser.parse(first_leg["date"])
+    last_date = parser.parse(last_leg["date"])
+    num_days = (last_date.date() - first_date.date()).days + 1
+    total_bt = sum(float(leg["bt"]) for leg in sorted_legs)
+    avg_bt = total_bt / num_days if num_days > 0 else total_bt
+    if avg_bt < 3.0:
+        return (False, f"Average block time {avg_bt:.2f} hrs/day is below 3 hrs/day.")
+    if dep_ok and arr_ok:
+        return (True, f"Reservation qualifies with average block time of {avg_bt:.2f} hrs/day over {num_days} days.")
+    else:
+        reasons = []
+        if not dep_ok:
+            reasons.append("Departure endpoint does not qualify.")
+        if not arr_ok:
+            reasons.append("Arrival endpoint does not qualify.")
+        return (False, " ".join(reasons))
+
+def rule_n6_eligible(legs, requested_ac: str):
+    sorted_legs = sorted(legs, key=lambda r: parser.parse(r["date"]))
+    first_leg = sorted_legs[0]
+    last_leg = sorted_legs[-1]
+    dep = first_leg["dep"].strip().upper()
+    arr = last_leg["arr"].strip().upper()
+    dep_region = region_mapping_us.get(dep[:2], "NO GROUP")
+    arr_region = region_mapping_us.get(arr[:2], "NO GROUP")
+    first_date = parser.parse(first_leg["date"])
+    last_date = parser.parse(last_leg["date"])
+    num_days = (last_date.date() - first_date.date()).days + 1
+    total_bt = sum(float(leg["bt"]) for leg in sorted_legs)
+    avg_bt = total_bt / num_days if num_days > 0 else total_bt
+    requested_ac_group = {
+        "EMB-505S": "Group I",
+        "EMB-505E": "Group I",
+        "CE-560XLS": "Group I",
+        "CE-560XLSA": "Group I",
+        "CE-680": "Group I",
+        "CE-680AS": "Group I",
+        "CL-350S": "Group II",
+        "CL3500": "Group II",
+        "CE-700": "Group III",
+        "CL-650S": "Group III",
+        "GL5500": "Group III",
+        "GL6000S": "Group IV",
+        "GL6000": "Group IV",
+        "GL7500": "GSA"
+    }
+    req_group = requested_ac_group.get(requested_ac, None)
+    if req_group == "Group I":
+        if dep_region == "Group I" and arr_region == "Group I":
+            if avg_bt >= 3.0:
+                return (True, f"Reservation qualifies for Group I with {avg_bt:.2f} hrs/day over {num_days} days.")
+            else:
+                return (False, f"Average block time {avg_bt:.2f} hrs/day is below 3 hrs for Group I flight.")
+        else:
+            return (False, "Endpoints are not both in Group I for a Group I flight.")
+    elif req_group in {"Group III", "Group IV"}:
+        if (dep_region in {"Group I", "Group III"}) and (arr_region in {"Group I", "Group III"}):
+            if avg_bt >= 3.0:
+                return (True, f"Reservation qualifies for {req_group} with {avg_bt:.2f} hrs/day over {num_days} days.")
+            else:
+                return (False, f"Average block time {avg_bt:.2f} hrs/day is below 3 hrs for {req_group} flight.")
+        else:
+            return (False, f"Endpoints do not meet required regions for {req_group} flight.")
+    else:
+        return (False, "Requested aircraft group not recognized for Rule n6.")
+
+def determine_reservation_waiver(legs, requested_ac: str):
+    sorted_legs = sorted(legs, key=lambda r: parser.parse(r["date"]))
+    if not check_tech_stops(sorted_legs):
+        return ("N", "Tech stop check failed.")
+    first_leg = sorted_legs[0]
+    last_leg = sorted_legs[-1]
+    
+    if requested_ac == "GL7500":
+        dep_ok = (is_gsa(first_leg["dep"]) or is_csa(first_leg["dep"]))
+        arr_ok = (is_gsa(last_leg["arr"]) or is_csa(last_leg["arr"]))
+        if dep_ok or arr_ok:
+            return ("Y", "Reservation qualifies for Global 7500 waiver (at least one endpoint in GSA).")
+        else:
+            return ("N", "Neither endpoint qualifies for Global 7500 GSA waiver.")
+    else:
+        dep_in = is_csa(first_leg["dep"])
+        arr_in = is_csa(last_leg["arr"])
+        if dep_in and arr_in:
+            return ("Y", "Reservation is entirely domestic (both endpoints in CSA).")
+        if dep_in != arr_in:
+            eligible, message = rule_n5_eligible(sorted_legs, requested_ac)
+            return ("Y" if eligible else "N", message)
+        if not dep_in and not arr_in:
+            eligible, message = rule_n6_eligible(sorted_legs, requested_ac)
+            return ("Y" if eligible else "N", message)
+    return ("N", "Unable to determine waiver eligibility.")
+
+def process_reservations(input_data: str, discount_def: str, default_program="NetJets U.S."):
     lines = input_data.splitlines()
     if not lines:
-        return "", "", "", []
-    # Remove header row if present.
+        return "", "", [], []
     if lines[0].strip().upper().startswith("REQUEST NUMBER"):
         header = lines.pop(0)
     else:
@@ -364,6 +506,7 @@ def process_table(input_data: str, discount_def: str, default_program="NetJets U
         program_index = first_row_parts.index("PROGRAM")
     elif len(first_row_parts) >= 18:
         program_index = 17
+
     rows = []
     for line in lines:
         parts = line.split("\t")
@@ -379,113 +522,83 @@ def process_table(input_data: str, discount_def: str, default_program="NetJets U
             "req_ac": parts[8],
             "bt": parts[9]
         }
-        # CONTRACTED A/C assumed at index 11
         if len(parts) > 11:
             row_data["contracted_ac"] = parts[11].strip()
         else:
-            row_data["contracted_ac"] = row_data["req_ac"]
-        # PRODUCT assumed at index 13
+            row_data["contracted_ac"] = row_data["req_number"]
         if len(parts) > 13:
             row_data["product"] = parts[13].strip()
         else:
             row_data["product"] = ""
-        # "PROGRAM" column if exists.
         if program_index is not None and len(parts) > program_index:
             row_data["program"] = parts[program_index].strip()
         else:
             row_data["program"] = default_program
-        # Read "Cont Hrs" (Contract Hours) from index 29 if available, else default to "0"
         if len(parts) > 29:
             row_data["cont_hrs"] = parts[29].strip()
         else:
             row_data["cont_hrs"] = "0"
         rows.append(row_data)
-    processed = []
-    for row in rows:
-        dep = row["dep"]
-        arr = row["arr"]
-        ac = row["req_ac"]
-        prog = row.get("program", default_program).lower()
-        if "europe" in prog:
-            dep_region = get_region_eu(dep)
-            arr_region = get_region_eu(arr)
-        else:
-            dep_region = ("CSA" if dep in CSA_AIRPORTS or dep.startswith("K")
-                          else region_mapping_us.get(dep[:2], region_mapping_us.get(dep[0], "NO GROUP")))
-            arr_region = ("CSA" if arr in CSA_AIRPORTS or arr.startswith("K")
-                          else region_mapping_us.get(arr[:2], region_mapping_us.get(arr[0], "NO GROUP")))
-        ac_group = aircraft_groups.get(ac, "NO GROUP")
-        waiver = {"ferry_in": "N", "ferry_out": "N"}
-        if dep_region == "CSA" or arr_region == "CSA":
-            waiver = {"ferry_in": "Y", "ferry_out": "Y"}
-            if dep_region == "CSA" and arr_region == "CSA":
-                basic_reason = "because both airports are in CSA"
-            elif dep_region == "CSA" and arr_region == "NO GROUP":
-                basic_reason = "because the departure is in CSA, but the arrival is not in any FWG"
-            elif arr_region == "CSA" and dep_region == "NO GROUP":
-                basic_reason = "because the arrival is in CSA, but the departure is not in any FWG"
-            elif dep_region == "CSA":
-                basic_reason = "because the departure is in CSA and the arrival is in the applicable FWG"
-            elif arr_region == "CSA":
-                basic_reason = "because the arrival is in CSA and the departure is in the applicable FWG"
-            else:
-                basic_reason = "because both airports are in CSA"
-        elif dep_region == "Group I" and arr_region == "Group I":
-            waiver = {"ferry_in": "Y", "ferry_out": "Y"}
-            basic_reason = "because both airports are in Group I (intra Group I flight)"
-        elif ((dep_region == "Group I" and arr_region == "Group III") or 
-              (dep_region == "Group III" and arr_region == "Group I")) and ac_group in ["Group III", "Group IV"]:
-            waiver = {"ferry_in": "Y", "ferry_out": "Y"}
-            basic_reason = "because the flight is between Group I and Group III and the aircraft is in Group III/IV"
-        else:
-            waiver = {"ferry_in": "N", "ferry_out": "N"}
-            basic_reason = "no applicable waiver rule applies"
-        if dep_region == "NO GROUP":
-            waiver["ferry_in"] = "N"
-            basic_reason += " (departure airport not in any FWG)"
-        if arr_region == "NO GROUP":
-            waiver["ferry_out"] = "N"
-            basic_reason += " (arrival airport not in any FWG)"
-        if "europe" in prog and "CSA" in basic_reason and "FWG" in basic_reason:
-            basic_reason += " (Europe)"
-        discount = calculate_discount(row)
-        if row.get("contracted_ac") and row["req_ac"].strip().upper() != row["contracted_ac"].strip().upper():
-            discount = "0%"
-            basic_reason += " (Discount not applicable because requested AC type does not match contracted AC type. Please check the interchange rate in IJet.)"
-        row["discount"] = discount
-        row["dep_region"] = dep_region
-        row["arr_region"] = arr_region
-        row["ac_group"] = ac_group
-        row["waiver"] = waiver
-        row["basic_reason"] = basic_reason
-        row["product_desc"] = product_mapping.get(row["product"], "No product info available")
-        processed.append(row)
-    groups = defaultdict(list)
-    for row in processed:
-        base = row["req_number"].split("-")[0]
-        prog = row["program"].strip().lower()
-        groups[(base, prog)].append(row)
-    # Do not re-sort; preserve input order.
-    final_processed = []
-    for key in groups.keys():
-        final_processed.extend(groups[key])
     
-    # Determine if double discount should be applied.
-    apply_double_discount = "doubled" in discount_def.lower() if discount_def.strip() else False
-    if apply_double_discount:
-        for key, legs in groups.items():
-            if legs:
-                first_leg = legs[0]
-                last_leg = legs[-1]
-                if (first_leg["dep"].strip().upper() in HE_AIRPORTS and
-                    last_leg["arr"].strip().upper() in HE_AIRPORTS):
-                    for row in legs:
-                        if "high efficiency" in row.get("product", "").strip().lower() and row["discount"] != "0%":
-                            base_disc = int(row["discount"].replace("%", ""))
-                            doubled = base_disc * 2
-                            row["discount"] = f"{doubled}%"
-                            row["basic_reason"] += f" (Discount doubled to {doubled}% as first leg departs and last leg arrives at a High Efficiency Airport)"
-                            row["doubled"] = True
+    groups = defaultdict(list)
+    for row in rows:
+        base = row["req_number"].split("-")[0]
+        groups[base].append(row)
+    
+    final_processed = []
+    group_waiver = {}
+    tech_stop_exists = False
+    for base, legs in groups.items():
+        req_ac = legs[0]["req_ac"].strip().upper()
+        waiver_decision, waiver_message = determine_reservation_waiver(legs, req_ac)
+        group_waiver[base] = (waiver_decision, waiver_message)
+        for idx, row in enumerate(legs):
+            is_tech_stop = (len(legs) > 1 and idx not in (0, len(legs)-1))
+            if is_tech_stop:
+                tech_stop_exists = True
+            if len(legs) > 1:
+                if idx == 0:
+                    if req_ac == "GL7500":
+                        row["waiver"] = {"ferry_in": "Y" if (is_gsa(row["dep"]) or is_csa(row["dep"])) else "N", "ferry_out": "Y"}
+                    elif req_ac in ["GL6000S", "GL6000"]:
+                        row["waiver"] = {"ferry_in": "Y" if qualifies_for_fw(row["dep"], req_ac) else "N", "ferry_out": "Y"}
+                    else:
+                        row["waiver"] = {"ferry_in": "Y" if qualifies_for_fw(row["dep"], req_ac) else "N", "ferry_out": "Y"}
+                elif idx == len(legs) - 1:
+                    if req_ac == "GL7500":
+                        row["waiver"] = {"ferry_in": "Y", "waiver_out": "Y" if waiver_decision == "Y" else ("Y" if (is_gsa(row["arr"]) or is_csa(row["arr"])) else "N")}
+                        row["waiver"] = {"ferry_in": "Y", "ferry_out": "Y" if waiver_decision == "Y" else ("Y" if (is_gsa(row["arr"]) or is_csa(row["arr"])) else "N")}
+                    elif req_ac in ["GL6000S", "GL6000"]:
+                        row["waiver"] = {"ferry_in": "Y", "ferry_out": "Y" if qualifies_for_fw(row["arr"], req_ac) else "N"}
+                    else:
+                        row["waiver"] = {"ferry_in": "Y", "ferry_out": "Y" if qualifies_for_fw(row["arr"], req_ac) else "N"}
+                else:
+                    row["waiver"] = {"ferry_in": "Y", "ferry_out": "Y"}
+            else:
+                if req_ac == "GL7500":
+                    if waiver_decision == "Y":
+                        row["waiver"] = {"ferry_in": "Y", "ferry_out": "Y"}
+                    else:
+                        row["waiver"] = {"ferry_in": "Y" if (is_gsa(row["dep"]) or is_csa(row["dep"])) else "N",
+                                         "ferry_out": "Y" if (is_gsa(row["arr"]) or is_csa(row["arr"])) else "N"}
+                elif req_ac in ["GL6000S", "GL6000"]:
+                    row["waiver"] = {"ferry_in": "Y" if qualifies_for_fw(row["dep"], req_ac) else "N",
+                                     "ferry_out": "Y" if qualifies_for_fw(row["arr"], req_ac) else "N"}
+                else:
+                    row["waiver"] = {"ferry_in": "Y" if qualifies_for_fw(row["dep"], req_ac) else "N",
+                                     "ferry_out": "Y" if qualifies_for_fw(row["arr"], req_ac) else "N"}
+            if waiver_decision == "Y":
+                discount = calculate_discount(row)
+            else:
+                discount = "0%"
+            row["discount"] = discount
+            basic_reason = build_explanation(row, waiver_message, waiver_decision, req_ac, is_tech_stop=is_tech_stop)
+            if is_tech_stop:
+                basic_reason += " (This flight is a tech stop and is not included in the overall average calculation.)"
+            row["basic_reason"] = basic_reason
+            row["product_desc"] = product_mapping.get(row["product"], "No product info available")
+            final_processed.append(row)
+    
     table_data = []
     for row in final_processed:
         discount_desc = f"Discount: {row['discount']}."
@@ -499,173 +612,148 @@ def process_table(input_data: str, discount_def: str, default_program="NetJets U
             "PRODUCT": row["product"],
             "PRODUCT DESC": row["product_desc"],
             "BT": row["bt"],
-            "A/C GROUP": row["ac_group"],
+            "A/C GROUP": aircraft_mapping.get(row["req_ac"], "NO GROUP"),
             "WAIVER IN": row["waiver"]["ferry_in"],
             "WAIVER OUT": row["waiver"]["ferry_out"],
             "DISCOUNT": row["discount"],
             "REASON": row["basic_reason"] + " " + discount_desc
         })
     
+    upcharge_rows = []
+    for base, legs in groups.items():
+        if len(legs) <= 1:
+            continue
+        first_date = min(parser.parse(leg["date"]) for leg in legs)
+        last_date = max(parser.parse(leg["date"]) for leg in legs)
+        num_days = (last_date.date() - first_date.date()).days + 1
+        total_bt = sum(float(leg["bt"]) for leg in legs)
+        avg_bt = total_bt / num_days if num_days > 0 else total_bt
+        if avg_bt < 3:
+            missing = (3 * num_days) - total_bt
+            if missing > 0 and missing <= 10:
+                new_row = {}
+                new_row["req_number"] = base + " Upcharge"
+                new_row["date"] = f"{first_date.strftime('%m/%d/%Y')} - {last_date.strftime('%m/%d/%Y')}"
+                new_row["program"] = legs[0]["program"]
+                new_row["dep"] = legs[0]["dep"]
+                new_row["arr"] = legs[-1]["arr"]
+                new_row["req_ac"] = legs[0]["req_ac"]
+                new_row["product"] = "Upcharge Option"
+                new_row["product_desc"] = "Upcharge option: Add extra hours to meet the minimum overall average of 3 hrs/day."
+                new_row["bt"] = f"{total_bt:.1f}"
+                new_row["cont_hrs"] = ""
+                new_row["waiver"] = {"ferry_in": "Y", "ferry_out": "Y"}
+                new_row["discount"] = f"Upcharge (Add {missing:.1f} hrs)"
+                new_row["basic_reason"] = (
+                    f"Upcharge Option: Overall flight time is {total_bt:.1f} hrs over {num_days} days (averaging {avg_bt:.2f} hrs/day). "
+                    f"To meet the minimum of 3 hrs/day (total required: {3*num_days:.1f} hrs), an additional {missing:.1f} hrs must be added. "
+                    "This option is cost effective."
+                )
+                upcharge_rows.append(new_row)
+    
+    upcharge_table = []
+    for row in upcharge_rows:
+        discount_desc = f"Discount: {row['discount']}."
+        upcharge_table.append({
+            "REQUEST NUMBER": row["req_number"],
+            "DATE": row["date"],
+            "PROGRAM": row["program"],
+            "DEP": row["dep"],
+            "ARR": row["arr"],
+            "REQ A/C": aircraft_mapping.get(row["req_ac"], row["req_ac"]),
+            "PRODUCT": row["product"],
+            "PRODUCT DESC": row["product_desc"],
+            "BT": row["bt"],
+            "WAIVER IN": row["waiver"]["ferry_in"],
+            "WAIVER OUT": row["waiver"]["ferry_out"],
+            "DISCOUNT": row["discount"],
+            "REASON": row["basic_reason"] + " " + discount_desc
+        })
+    
+    detailed_logic = "\n".join([f"- **{r['req_number']}**: {r['basic_reason']}" for r in final_processed])
+    note = "\n**Note:** Tech stops are not included in the overall average block time calculation." if tech_stop_exists else ""
+    reservation_summary = f"Detailed Flight Evaluation:\n{detailed_logic}{note}\n"
+    
     if final_processed:
         total_flight_time = sum(float(row["bt"]) for row in final_processed if row["bt"])
-        total_contract_hours = sum(float(row["cont_hrs"]) for row in final_processed if row.get("cont_hrs") and row["cont_hrs"].replace('.','',1).isdigit())
-        dates = [parser.parse(row["date"]) for row in final_processed]
-        first_date = min(dates)
-        last_date = max(dates)
+        total_contract_hours = sum(float(row["cont_hrs"]) for row in final_processed if row.get("cont_hrs") and row["cont_hrs"].replace('.', '', 1).isdigit())
+        dates_list = [parser.parse(row["date"]) for row in final_processed]
+        first_date = min(dates_list)
+        last_date = max(dates_list)
         days = (last_date - first_date).days + 1
         avg_ft = total_flight_time / days if days > 0 else total_flight_time
-        reservation_summary = (
+        summary_text = (
             f"Reservation spans from {first_date.strftime('%m/%d/%Y')} to {last_date.strftime('%m/%d/%Y')} "
-            f"({days} days), with a total flight time of {total_flight_time} hrs, averaging {avg_ft:.2f} hrs per day.\n"
-        )
-        product_info = {}
-        for row in final_processed:
-            prod = row.get("product", "")
-            desc = row.get("product_desc", "")
-            if prod:
-                product_info[prod] = desc
-        if product_info:
-            product_summary = "Reservation Product Summary:" + "".join(f"\n- {p}: {d}" for p, d in product_info.items())
-        else:
-            product_summary = "Reservation Product Summary: None"
-        
-        # Check continuity: same arrival/departure and same requested AC type.
-        is_continuous = all(
-            final_processed[i-1]["arr"].strip().upper() == final_processed[i]["dep"].strip().upper() and 
-            final_processed[i-1]["req_ac"].strip().upper() == final_processed[i]["req_ac"].strip().upper()
-            for i in range(1, len(final_processed))
-        )
-        
-        # Check if every leg is fully ferry waived.
-        fully_waived = all(row["waiver"]["ferry_in"] == "Y" and row["waiver"]["ferry_out"] == "Y" for row in final_processed)
-        
-        # Build detailed discount explanation.
-        discount_explanation = []
-        for row in final_processed:
-            if row["discount"] != "0%":
-                try:
-                    bt = float(row["bt"])
-                except:
-                    bt = 0.0
-                if "high efficiency" in row.get("product", "").strip().lower():
-                    if bt < 3.5:
-                        tier_explanation = "a 20% discount" 
-                    elif bt < 4.5:
-                        tier_explanation = "a 30% discount" 
-                    else:
-                        tier_explanation = "a 40% discount" 
-                    if row.get("doubled", False):
-                        tier_explanation += " (discount doubled)"
-                else:
-                    tier_explanation = f"a {row['discount']} discount based on flight time criteria"
-                discount_explanation.append(
-                    f"Leg {row['req_number']} received {tier_explanation} for a High Efficiency product operating within the CSA."
-                )
-        if discount_explanation:
-            discount_summary = "Discount Details: " + " ".join(discount_explanation)
-        else:
-            discount_summary = "No discount was applied on any leg."
-        
-        # Check if any leg has a requested AC type different from contracted AC type.
-        mismatch_found = any(
-            row["req_ac"].strip().upper() != row["contracted_ac"].strip().upper() 
-            for row in final_processed
-        )
-        mismatch_note = ""
-        if mismatch_found:
-            mismatch_note = " Additionally, one or more legs have a mismatch between the requested and contracted aircraft type. Please verify that the interchange rate is applied correctly."
-        
-        # Build AI Conclusion with detailed explanation.
-        if not is_continuous:
-            reasons = []
-            for i in range(1, len(final_processed)):
-                prev = final_processed[i-1]
-                curr = final_processed[i]
-                if prev["arr"].strip().upper() != curr["dep"].strip().upper():
-                    reasons.append(f"Leg {prev['req_number']} arrival ({prev['arr']}) does not match leg {curr['req_number']} departure ({curr['dep']}).")
-                if prev["req_ac"].strip().upper() != curr["req_ac"].strip().upper():
-                    reasons.append(f"Leg {prev['req_number']} requested AC ({prev['req_ac']}) differs from leg {curr['req_number']} requested AC ({curr['req_ac']}).")
-            reason_str = " ".join(reasons) if reasons else "Continuity requirements are not met."
-            ai_conclusion = (
-                "Conclusion: The reservation does not meet the continuity requirements: " +
-                reason_str +
-                " Therefore, only standard ferry fees are applicable. Please submit an estimate based solely on these fees."
-            )
-        elif fully_waived:
-            ai_conclusion = (
-                "Conclusion: The reservation is continuous and fully qualifies for a ferry waiver on all legs. No additional upcharge is required. "
-                + discount_summary
-            )
-        elif avg_ft < 3:
-            upcharge = (3 * days) - total_flight_time
-            if upcharge > 10:
-                ai_conclusion = (
-                    f"Conclusion: The reservation is continuous but averages only {avg_ft:.2f} hrs per day, which is below the required 3 hrs per day. "
-                    f"An additional {upcharge:.2f} hrs is needed to meet the minimum flight time requirement. This additional charge is significant and may not be cost effective; please review the available contract hours and consider using standard ferry fees instead. "
-                    + discount_summary
-                )
-            else:
-                ai_conclusion = (
-                    f"Conclusion: The reservation is continuous but averages only {avg_ft:.2f} hrs per day, which is below the required minimum of 3 hrs per day. "
-                    f"An additional {upcharge:.2f} hrs is needed to meet the requirement. Please prepare two estimates: one based solely on standard ferry fees, and a second incorporating the additional upcharge. Also, ensure that the contract has sufficient hours to cover the extra time. "
-                    + discount_summary
-                )
-        else:
-            ai_conclusion = (
-                "Conclusion: The reservation is continuous and meets the minimum daily flight time requirement of 3 hours. No additional upcharge is necessary. "
-                + discount_summary
-            )
-        
-        # Always add the total contract hours available and mismatch note if applicable.
-        ai_conclusion += f" Total Contract Hours available: {total_contract_hours:.2f} hrs.{mismatch_note}"
-        
-        explanation = (
-            "Detailed Reservation Explanation:\n" +
-            reservation_summary +
-            "\n" +
-            product_summary +
-            "\n" +
-            ("Note: No discount is applicable to any leg not operated on the NetJets U.S. program."
-             if not all(row["program"].strip().lower() == "netjets u.s." for row in final_processed)
-             else "Note: Discount is applicable to this reservation.")
+            f"({days} days), total flight time: {total_flight_time} hrs, averaging {avg_ft:.2f} hrs per day."
         )
     else:
-        reservation_summary = "No valid rows processed."
-        explanation = ""
-        ai_conclusion = ""
-    final_summary = explanation
-    return final_summary, ai_conclusion, table_data
+        summary_text = ""
+    
+    ai_rewrite = rewrite_text(reservation_summary)
+    ai_conclusion = ai_rewrite + f"\nTotal Contract Hours available: {total_contract_hours:.2f} hrs."
+    
+    explanation = summary_text + "\n" + reservation_summary
+    return explanation, ai_conclusion, table_data, upcharge_table
 
-# ----------------------------
-# Streamlit App
-# ----------------------------
 def main():
     st.title("Estimates Table Planning Processor")
     st.write(
         "Paste your table data (tab-separated) below and click **Process Table**. "
-        "The header row is auto-detected and skipped. Each row's PROGRAM and PRODUCT values are read from the input if provided; "
-        "otherwise, they default to NetJets U.S. and an empty product respectively."
+        "The header row is auto-detected. PROGRAM and PRODUCT default to **NetJets U.S.** if not provided."
     )
     
-    # Use widget_key in keys for both discount and input text areas to clear on reset.
-    discount_text = st.text_area("Discount Definitions", height=170, key=f"discount_input_{st.session_state.widget_key}",
-                                  help="Enter discount rule examples (free text) as provided in IJet.")
+    # --- New Section: Show All Reservations ---
+    st.markdown("## Show All Reservations")
+    if st.button("Show All Reservations"):
+        df_all = load_all_reservations()
+        if "file_cached" not in st.session_state:
+            st.session_state["file_cached"] = True
+            st.info("File loaded from disk and cached.")
+        else:
+            st.info("File already cached.")
+        st.write("Total rows loaded:", len(df_all))
+        st.write("Column names:", df_all.columns.tolist())
+        st.dataframe(df_all, height=500)
     
-    input_text = st.text_area("Input Table Data", height=160, key=f"input_text_{st.session_state.widget_key}")
+    # --- New Section: Load Reservation ---
+    st.markdown("## Load Reservation")
+    reservation_input = st.text_input("Enter Reservation Number", key="reservation_input")
+    if st.button("Load Reservation"):
+        if reservation_input:
+            with st.spinner("Loading reservation..."):
+                try:
+                    res_df = load_reservation(reservation_input)
+                    st.session_state.reservation_df = res_df
+                    st.write("Loaded Reservation Data:")
+                    st.dataframe(res_df, height=500)
+                except Exception as e:
+                    st.error(f"Error loading reservation: {e}")
+        else:
+            st.warning("Please enter a reservation number.")
+    
+    # --- Existing Input Areas ---
+    discount_text = st.text_area("Discount Definitions", height=250, key=f"discount_input_{st.session_state.widget_key}",
+                                  help="Enter discount rule examples (free text) as provided in IJet.")
+    input_text = st.text_area("Input Table Data", height=250, key=f"input_text_{st.session_state.widget_key}")
     
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Process Table"):
             if input_text:
-                expl, ai_conclusion, table_data = process_table(input_text, discount_text, default_program="NetJets U.S.")
+                expl, ai_conclusion, table_data, upcharge_table = process_reservations(input_text, discount_text, default_program="NetJets U.S.")
                 if discount_text.strip():
                     expl += "\n\nDiscount Rules:\n" + discount_text
                 st.session_state.explanation_text = expl
                 st.session_state.ai_text = ai_conclusion
                 df = pd.DataFrame(table_data)
-                # Use styled DataFrame for better text wrapping on the REASON column.
                 styled_df = df.style.set_properties(subset=["REASON"], **{'white-space': 'pre-wrap'})
                 st.session_state.table_df = styled_df
+                if upcharge_table:
+                    up_df = pd.DataFrame(upcharge_table)
+                    styled_up = up_df.style.set_properties(subset=["REASON"], **{'white-space': 'pre-wrap'})
+                    st.session_state.upcharge_df = styled_up
+                else:
+                    st.session_state.upcharge_df = None
             else:
                 st.warning("Please enter your input data.")
     with col2:
@@ -674,11 +762,8 @@ def main():
             st.session_state.explanation_text = ""
             st.session_state.ai_text = ""
             st.session_state.table_df = None
-            try:
-                st.experimental_rerun()
-            except Exception as e:
-                st.write("Please refresh the page to clear the inputs.")
-
+            st.session_state.upcharge_df = None
+            st.write("Inputs have been cleared. Please refresh the page if needed.")
     
     if st.session_state.table_df is not None:
         st.write("Row Details Table:")
@@ -686,11 +771,17 @@ def main():
             f'<div class="row-details-table">{st.session_state.table_df.to_html(escape=False)}</div>',
             unsafe_allow_html=True
         )
+    if st.session_state.upcharge_df is not None:
+        st.write("Upcharge Option Table (Additional Hours Required to Meet 3 hrs/day Rule):")
+        st.markdown(
+            f'<div class="row-details-table">{st.session_state.upcharge_df.to_html(escape=False)}</div>',
+            unsafe_allow_html=True
+        )
     
     st.markdown("### Detailed Reservation Explanation:")
-    st.text_area("Explanation", value=st.session_state.explanation_text, height=300)
+    st.text_area("Explanation", value=st.session_state.explanation_text, height=500)
     st.markdown("### AI Conclusion:")
-    st.text_area("Conclusion", value=st.session_state.ai_text, height=200)
+    st.text_area("Conclusion", value=st.session_state.ai_text, height=500)
 
 if __name__ == "__main__":
     main()
