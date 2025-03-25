@@ -1,23 +1,22 @@
-import os
 import streamlit as st
+import pandas as pd
 
 def main():
-    # Check the UNC directory first
-    dir_path = r"\\cmhfps03\DATA"
-    st.write("Checking if UNC directory exists:", dir_path)
-    dir_exists = os.path.exists(dir_path)
-    st.write("Directory exists?", dir_exists)
-    
-    # Now check the full file path using UNC format (with backslashes)
-    file_path = r"\\cmhfps03\DATA\FLIGHT CENTER\International Planning\Intl Estimates\Estimates Tool\Data\QUOTES_Workflow_Report.xlsx"
-    st.write("Checking UNC file path (backslashes):", file_path)
-    file_exists = os.path.exists(file_path)
-    st.write("File exists?", file_exists)
-    
-    if not file_exists:
-        st.error("File not found using UNC path! Please verify the UNC path and that you have permissions to access it.")
+    st.title("Excel File Uploader and Viewer")
+    st.write("Please upload your Excel file.")
+
+    uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx", "xls"])
+    if uploaded_file is not None:
+        try:
+            df = pd.read_excel(uploaded_file)
+            st.write("File successfully loaded!")
+            st.write("Total rows:", len(df))
+            st.write("Columns:", df.columns.tolist())
+            st.dataframe(df)
+        except Exception as e:
+            st.error(f"Error reading Excel file: {e}")
     else:
-        st.success("File found using UNC path!")
-    
+        st.info("Awaiting file upload.")
+
 if __name__ == "__main__":
     main()
