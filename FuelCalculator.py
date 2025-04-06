@@ -15,7 +15,7 @@ ac_fuel_constants = {
     "C605": 750,
     "GL5T": 1250,
     "GL6T": 1250,
-    "GL7T": 1250
+    "GL75": 1250
 }
 
 # Full list of Union airports based on the ReFuelEU scope (2025)
