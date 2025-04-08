@@ -1,0 +1,6 @@
+streamlit
+streamlit-aggrid
+pandas
+python-dateutil
+openai
+requests
