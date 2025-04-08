@@ -1,6 +1,7 @@
 streamlit
-streamlit-aggrid
 pandas
+streamlit-aggrid
+openpyxl
 python-dateutil
-openai
 requests
+openai
