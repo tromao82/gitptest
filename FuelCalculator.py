@@ -159,7 +159,7 @@ with col2:
             st.write(f"**FOM Value:** max(10% of {dest}, 30' {ac_type} {extra_30min}) = {fom:.0f} lbs")
             st.write(f"**FOB:** {fuel_onboard} lbs")
             st.write(f"**Total Fuel Required for compliance Max(FOB+RefuelEU Fuel,MIN + TXO + FOM - FOB)**")
-            st.write(f"**Total Fuel Required for compliance** Max({fuel_onboard} + {final_uplift:.0f}, {min_fuel} + {taxi} + {fom:.0f} - {fuel_onboard}) = {total_required_rounded} lbs")
+            st.write(f"**Total Fuel Required for compliance** Max({fuel_onboard} + {final_uplift:.0f}, {min_fuel} + {taxi} + {fom:.0f}) = {total_required_rounded} lbs")
             st.write(f"**Flight Plan TOT:** {total_required_rounded} lbs")
             st.success("**Policy Used:** RefuelEU (adjusted to meet FOM 2.4.7)")
             if dep in union_airports:
@@ -173,7 +173,7 @@ with col2:
             st.write(f"**FOM Value:** max(10% of {dest}, 30' {ac_type} {extra_30min}) = {fom:.0f} lbs")
             st.warning("**Flight is not eligible for RefuelEU.**")
             st.write(f"**FOB:** {fuel_onboard} lbs")
-            st.write(f"**Total Fuel Required for compliance(MIN + TXO + FOM - FOB):** {min_fuel} + {taxi} + {fom:.0f} - {fuel_onboard} = {required_total_rounded} lbs")
+            st.write(f"**Total Fuel Required for compliance(MIN + TXO + FOM - FOB):** {min_fuel} + {taxi} + {fom:.0f} = {required_total_rounded} lbs")
             st.write(f"**Flight Plan TOT:** {required_total_rounded} lbs")
             st.success("**Policy Used:** FOM 2.4.7")
             st.warning(f"**If not able to comply with {fom:.0f} lbs XTR (TOT {flight_plan_TOT} lbs ), add Enroute Alternate and Flight Plan note: Enroute alternate due to FOM 2.4.7 .**")
