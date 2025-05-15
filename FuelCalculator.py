@@ -158,7 +158,7 @@ with col2:
             st.write(f"**RefuelEU Value:** 90% × ({dest} + {taxi}) = {refueleu:.0f} lbs")
             st.write(f"**FOM Value:** max(10% of {dest}, 30' {ac_type} {extra_30min}) = {fom:.0f} lbs")
             st.write(f"**FOB:** {fuel_onboard} lbs")
-            st.write(f"**Total Fuel Required for compliance Max(FOB+RefuelEU Fuel,MIN + TXO + FOM - FOB)**")
+            st.write(f"**Total Fuel Required for compliance Max(FOB+RefuelEU Fuel,MIN + TXO + FOM)**")
             st.write(f"**Total Fuel Required for compliance** Max({fuel_onboard} + {final_uplift:.0f}, {min_fuel} + {taxi} + {fom:.0f}) = {total_required_rounded} lbs")
             st.write(f"**Flight Plan TOT:** {total_required_rounded} lbs")
             st.success("**Policy Used:** RefuelEU (adjusted to meet FOM 2.4.7)")
