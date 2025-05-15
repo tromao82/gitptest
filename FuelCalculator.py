@@ -150,7 +150,7 @@ with col2:
 
         if refueleu_applies:
             final_uplift = max(refueleu, fom)
-            total_required = max(fuel_onboard + final_uplift, min_fuel + taxi + fom - fuel_onboard)
+            total_required = max(fuel_onboard + final_uplift, min_fuel + taxi + fom)
             total_required_rounded = int(math.ceil(total_required / 100.0)) * 100
             flight_plan_TOT = fuel_onboard + total_required_rounded
             fom247 = min_fuel + taxi + fom
@@ -167,7 +167,7 @@ with col2:
             st.warning(f"**If not able to comply with {fom:.0f} lbs XTR (TOT {fom247:.0f} lbs), add Enroute Alternate and Flight Plan note: Enroute alternate due to FOM 2.4.7 .**")
 
         else:
-            required_total = min_fuel + taxi + fom - fuel_onboard
+            required_total = min_fuel + taxi + fom
             required_total_rounded = int(math.ceil(required_total / 100.0)) * 100
             flight_plan_TOT = fuel_onboard + required_total_rounded
             st.write(f"**FOM Value:** max(10% of {dest}, 30' {ac_type} {extra_30min}) = {fom:.0f} lbs")
