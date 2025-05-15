@@ -163,7 +163,7 @@ with col2:
             st.write(f"**Flight Plan TOT:** {total_required_rounded} lbs")
             st.success("**Policy Used:** RefuelEU (adjusted to meet FOM 2.4.7)")
             if dep in union_airports:
-                st.warning(f"**If not able to refuel min {refueleu:.0f} lbs (TOT {flight_plan_TOT} lbs), add note on Flight Plan: Unable to comply with RefuelEU due to XXXX**")
+                st.warning(f"**If not able to refuel min {refueleu:.0f} lbs (TOT {total_required_rounded} lbs), add note on Flight Plan: Unable to comply with RefuelEU due to XXXX**")
             st.warning(f"**If not able to comply with {fom:.0f} lbs XTR (TOT {fom247:.0f} lbs), add Enroute Alternate and Flight Plan note: Enroute alternate due to FOM 2.4.7 .**")
 
         else:
@@ -176,4 +176,4 @@ with col2:
             st.write(f"**Total Fuel Required for compliance(MIN + TXO + FOM - FOB):** {min_fuel} + {taxi} + {fom:.0f} = {required_total_rounded} lbs")
             st.write(f"**Flight Plan TOT:** {required_total_rounded} lbs")
             st.success("**Policy Used:** FOM 2.4.7")
-            st.warning(f"**If not able to comply with {fom:.0f} lbs XTR (TOT {flight_plan_TOT} lbs ), add Enroute Alternate and Flight Plan note: Enroute alternate due to FOM 2.4.7 .**")
+            st.warning(f"**If not able to comply with {fom:.0f} lbs XTR (TOT {total_required_rounded} lbs ), add Enroute Alternate and Flight Plan note: Enroute alternate due to FOM 2.4.7 .**")
