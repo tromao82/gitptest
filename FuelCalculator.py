@@ -48,7 +48,8 @@ union_airports = {
     "LIMJ", "LICA", "LIML", "LIMC", "LIRN", "LIEO", "LICJ", "LIBP", "LIRP", "LIRA", "LIRF", "LIMF",
     "LICT", "LIPH", "LIPQ", "LIPZ", "LIPX", "EYKA", "EYVI", "ELLX", "EVRA", "LMML", "EHAM", "EHEH",
     "EHRD", "EPGD", "EPKT", "EPKK", "EPWA", "EPPO", "EPRZ", "EPMO", "EPWR", "LPFR", "LPPT", "LPPR",
-    "LROP", "LRCL", "LRIA", "LRTR", "ESGG", "ESPA", "ESMS", "ESSA", "ESSB", "LJLJ", "LZIB"
+    "LROP", "LRCL", "LRIA", "LRTR", "ESGG", "ESPA", "ESMS", "ESSA", "ESSB", "LJLJ", "LZIB", "LSZH",
+    "LSGG"
 }
 
 # --- Title & Sidebar ---
@@ -177,3 +178,4 @@ with col2:
             st.write(f"**Flight Plan TOT:** {required_total_rounded} lbs")
             st.success("**Policy Used:** FOM 2.4.7")
             st.warning(f"**If not able to comply with {fom:.0f} lbs XTR (TOT {total_required_rounded} lbs ), add Enroute Alternate and Flight Plan note: Enroute alternate due to FOM 2.4.7 .**")
+
